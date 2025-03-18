@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Code Runner</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/lint/lint.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/show-hint.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/dracula.min.css">
     <style>
         body {
@@ -94,6 +96,48 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
+
+          /* Base style for autocomplete dropdown */
+  .CodeMirror-hints {
+    background-color: #2d2d2d;
+    color: #f8f8f2;
+    border: 1px solid #44475a;
+    border-radius: 4px;
+    font-family: 'Fira Code', monospace;
+    font-size: 14px;
+    padding: 4px 0;
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* Style for individual hint item */
+  .CodeMirror-hint {
+    padding: 6px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.2s ease;
+  }
+
+  /* Highlighted hint when hovering or selected */
+  .CodeMirror-hint-active {
+    background-color: #44475a;
+    color: #8be9fd;
+  }
+
+  /* Scrollbar styling for autocomplete */
+  .CodeMirror-hints::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .CodeMirror-hints::-webkit-scrollbar-thumb {
+    background-color: #44475a;
+    border-radius: 4px;
+  }
+
+  .CodeMirror-hints::-webkit-scrollbar-thumb:hover {
+    background-color: #6272a4;
+  }
     </style>
 </head>
 <body>
@@ -124,9 +168,42 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/javascript/javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/javascript/typescript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/typescript/5.2.2/typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/comment/comment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/keymap/sublime.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/lint/lint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/lint/javascript-lint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/lint/json-lint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/lint/yaml-lint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jshint/2.13.4/jshint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/eslint/8.53.0/eslint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/lint/tern-lint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/show-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/javascript-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/anyword-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/css-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/html-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/xml-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/sql-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/hint/python-hint.min.js"></script>
+
     <script>
         const output = document.getElementById('output');
         const languageSelect = document.getElementById('languageSelect');
+
+        const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+            lineNumbers: true,
+            mode: languageSelect.value === "typescript" ? "text/typescript" : "javascript",
+            theme: "dracula",
+            lineWrapping: true,
+            tabSize: 2,
+            keyMap: "sublime", // Enable Sublime Text keybindings (including Ctrl + /)
+            extraKeys: {
+                "Ctrl-/": "toggleComment",  // Windows/Linux
+                "Cmd-/": "toggleComment"    // Mac
+            },
+            gutters: ["CodeMirror-lint-markers"], // Space for lint markers
+            lint: true,  // Enable linting
+        });
 
         // Custom console to capture output
         const customConsole = {
@@ -135,6 +212,56 @@
             warn: (...args) => printOutput('warn', args),
             info: (...args) => printOutput('info', args)
         };
+
+        const CODE_STORAGE_KEY = 'code_runner_code';
+        const LANGUAGE_STORAGE_KEY = 'code_runner_language';
+        const TIMESTAMP_KEY = 'code_runner_timestamp';
+        const EXPIRATION_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+        function isExpired(timestamp) {
+            return Date.now() - timestamp > EXPIRATION_TIME;
+        }
+
+        // Load code and language from local storage
+        const savedCode = localStorage.getItem(CODE_STORAGE_KEY);
+        const savedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+        const savedTimestamp = parseInt(localStorage.getItem(TIMESTAMP_KEY), 10);
+
+        // Check if the code has expired
+        if (savedCode && savedTimestamp && !isExpired(savedTimestamp)) {
+            editor.setValue(savedCode);
+            languageSelect.value = savedLanguage || 'javascript';
+        } else {
+            // Clear expired data
+            localStorage.removeItem(CODE_STORAGE_KEY);
+            localStorage.removeItem(LANGUAGE_STORAGE_KEY);
+            localStorage.removeItem(TIMESTAMP_KEY);
+        }
+
+        // Autocomplete on input event (for real-time suggestions)
+        editor.on("inputRead", function(cm, change) {
+            if (!cm.state.completionActive && change.origin !== "paste") {
+                CodeMirror.commands.autocomplete(cm, null, { completeSingle: false });
+            }
+        });
+
+
+
+        // Save code to local storage whenever it changes
+        editor.on('change', () => {
+            const code = editor.getValue();
+            localStorage.setItem(CODE_STORAGE_KEY, code);
+            localStorage.setItem(TIMESTAMP_KEY, Date.now().toString());
+        });
+
+        // Save language preference when changed
+        languageSelect.addEventListener('change', () => {
+            const mode = languageSelect.value === "typescript" ? "text/typescript" : "javascript";
+            editor.setOption("mode", mode);
+            localStorage.setItem(LANGUAGE_STORAGE_KEY, languageSelect.value);
+            localStorage.setItem(TIMESTAMP_KEY, Date.now().toString());
+        });
+
 
         function printOutput(type, args) {
             const message = args.map(arg => 
@@ -152,13 +279,6 @@
             output.scrollTop = output.scrollHeight;
         }
 
-        const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
-            lineNumbers: true,
-            mode: "javascript",
-            theme: "dracula",
-            lineWrapping: true,
-            tabSize: 2,
-        });
 
         languageSelect.addEventListener('change', () => {
             const mode = languageSelect.value === "typescript" ? "text/typescript" : "javascript";
